@@ -1,0 +1,140 @@
+---
+title: "SNA_Lab1"
+author: Kalyani Subbiah
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Hypothesis: Gender homophily in one's network limits professional advancement (status - partner or associate). 
+
+I will explore the Lazega dataset, which is a dataset of lawyers working at a firm in order to test this hypothesis. 
+
+I came accross a research study claiming that women who have more women in their network tend to advance faster on average. However, I was skeptical of this finding and decided to test this study on the small Lazega lawyer network, by testing if gender homophily affects status or advancement. 
+
+Intuitively, having a more diverse network should lead to more advancement. However, a variety of outcomes affect status (partner/associate), including gender, practice, degree of connections, office and law-school, which need to be included as control variables. I will utilize the attributes and friends files to answer the research hypothesis.
+
+Limitation: The causation is also likely to be inversed, i.e. seniority affects the nature of friends. However, we assume that the connections have been maintained for a longer while.
+
+Dependent variable: Status: a two-level variable that indicates whether the person is a partner or associate(1=partner; 2=associate). Ideally we'd like a more granular indicator, but given the size of the dataset, this is acceptable. 
+
+Independent variable: The two measures of gender homophily are: 
+a) Proportion: Number of connections (friends) that are of the same gender as a fraction of total number of connections
+b) Number: Number of connections (friends) that are of the same gender
+
+This exploration will use the first measure since it is not related to   the degree or number of friends in the network.
+Control variables: Gender (1=man; 2=woman), Age, Practice (1=litigation; 2=corporate), Law-School (1: harvard, yale; 2: ucon; 3: other), Office (1=Boston; 2=Hartford; 3=Providence)
+
+##### Preprocessing
+```{r}
+friends = read.csv("/Users/kalyani/01ColumbiaQMSS/01Semester2/SNA/Lazega_Files/Lazega-Friends%2B-%2BSheet1.csv")
+atts = read.csv("/Users/kalyani/01ColumbiaQMSS/01Semester2/SNA/Lazega_Files/Lazega-Atts.csv")
+degrees = c()
+for (column in friends) {
+  degrees = append(degrees, sum(column))
+}
+
+atts$degree <-  degrees
+
+
+gender <- function(id_num){
+  return(subset(atts, ID == substring(id_num, 2))$gender)
+}
+
+same_gender_degrees = c()
+for (name in names(friends)) {
+  id_name = as.numeric(substring(name, 2))
+  same_gender_degree = 0
+  main_gender = gender(name)
+  for (x in 1:71) {
+    ID1 = paste('X', x, sep = "")
+    new_gender = gender(ID1)
+      if (new_gender== main_gender) {
+        if (friends[x,id_name] == 1) {
+        same_gender_degree = same_gender_degree + 1
+        }
+    }
+  }
+  same_gender_degrees = append(same_gender_degrees, same_gender_degree)
+}
+
+atts$same_gender_degree = same_gender_degrees
+atts = transform(atts, prop_same_gender = (same_gender_degree)/(degree))
+atts$gender  = as.factor(atts$gender)
+atts$status  = as.factor(atts$status)
+atts$office  = as.factor(atts$office)
+atts$practice  = as.factor(atts$practice)
+atts$lawschool  = as.factor(atts$lawschool)
+atts =subset(atts, prop_same_gender != Inf)
+
+```
+
+
+
+## Model 1:
+
+The first model was a direct test of the hypothesis. I fitted a logistic regression model on status without the control variables.
+
+The proportion of people in the same gender in the lawyer's networks has a negative effect on status, when not controlling for the other factors. A 1 unit increase in the proportion of same gender lawyers in the network decreases the log odds of being a partner by 2.888, without any control variables. This confirms the hypothesis. 
+
+The next model adds control variables to the model.
+```{r}
+summary(glm(status ~ prop_same_gender, data=atts,family = "binomial"))
+```
+## Model 2: Adding control variables
+
+In this case, the proportion of same gender lawyers in the network no longer affects advancement, when the control variables are added. This could indicate correlation between the independent variable and the control variables, since the coefficients for degree, office and lawschool are significant. This is tested and found to be true, since there is a strong relationship between the proportion of same gender lawyers in the network and the office that the person works in. The members of office 2 and 3 (Hartford and Providence) are much more likely to have more same gender friends than those in office 1 (Boston).
+```{r}
+summary(glm(status ~ prop_same_gender + gender + degree+ practice + office + lawschool, data=atts,family = "binomial"))
+```
+
+
+```{r}
+summary(lm(prop_same_gender ~   degree + office + lawschool, data=atts))
+```
+
+Since office does not appear to significantly affect advancement, as indicated by the below model, it can be excluded from the main model.
+```{r}
+summary(glm(status ~   office, data=atts, family= binomial))
+```
+
+However, regressing  the proportion of same gender friends to total friends on lawschool attended does not produce significant coefficients.
+```{r}
+summary(lm(prop_same_gender ~ lawschool, data=atts))
+```
+
+## Model 3: Variation by gender
+
+How is the proportion of same gender friends affected by gender?
+
+Women have less same-gender connections than men, with women having -0.499 less proportion of same gender connections than men. This is expected, given the larger number of men than women in the office, but could also indicate the presence of greater male solidarity than female solidarity. However, gender does not have significant effect on the degree of the network.
+```{r}
+table(atts$gender)
+```
+
+```{r}
+summary(lm(prop_same_gender ~ gender, data=atts))
+```
+
+```{r}
+summary(lm(degree ~ gender, data=atts))
+```
+
+```{r}
+summary(glm(status ~ gender, data=atts, family = 'binomial'))
+```
+
+Since gender and propotion of same gender friends are highly correlated, and this leads to insignificant coefficients when testing for interactions between both.
+
+But, gender has a significant effect on status, indicating that being female gives one 2.04 log odds more likelihood of being made partner than being male. This indicates that men with the fewest cross-gender connections are more likely to be left behind in the advancement process. 
+### Model 4: 
+The final model can incorporate the regression of status on proportion of same gender friends, controlling for lawschool, degree and practice
+
+This shows that a 0.1 increase in the proportion of same gender friends leads to a 0.328 fall in the log odds of being partner on average, controlling for degree of connections, practice, and lawschool. 
+```{r}
+summary(glm(status ~ prop_same_gender  + degree + practice + lawschool, data=atts,family = "binomial"))
+```
+
+The initial hypothesis held up: Having a higher proportion of same-gender friends is likely to mean that one is a partner, controlling for other uncorrelated variables like degree, practice and law-school.  It is also interesting that men with the fewest cross-gender connections are more likely to be associates. However, the dataset is small and limited to the law profession. Hence it is not easily generalizable. Future exploration could centre on collecting panel data on a group of female lawyers aand deciding on whether a higher proportion of same gender connections lead to greater advancement, or working with the advice networks data. 
